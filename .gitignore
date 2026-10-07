@@ -1,0 +1,27 @@
+venv/
+# Data
+data/raw/
+data/processed/
+*.parquet
+*.json
+*.csv
+
+# Models
+*.h5
+*.pkl
+*.pt
+
+# Python
+__pycache__/
+*.py[cod]
+.ipynb_checkpoints/
+venv/
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
