@@ -3,10 +3,6 @@
 Input:  data/processed/features.parquet
 Output: models/lstm_model.keras + reports
 """
-import tensorflow as tf
-tf.random.set_seed(42)
-np.random.seed(42)
-
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'
@@ -26,7 +22,7 @@ PROC = Path("data/processed")
 MODELS = Path("models")
 MODELS.mkdir(exist_ok=True)
 
-# Config — back to first version (no Dropout)
+# Config
 SEQ_LEN = 24
 LSTM_UNITS = 256
 DENSE_1 = 20
@@ -34,6 +30,7 @@ DENSE_2 = 20
 EPOCHS = 50
 BATCH_SIZE = 32
 PATIENCE = 10
+RANDOM_SEED = 42
 
 FEATURE_COLS = [
     "forecast_wind_da",
@@ -58,6 +55,10 @@ def make_sequences(df, seq_len=24):
 
 
 def main():
+    # Seed for reproducibility
+    tf.random.set_seed(RANDOM_SEED)
+    np.random.seed(RANDOM_SEED)
+
     print("Loading features...")
     df = pd.read_parquet(PROC / "features.parquet")
     df = df.sort_values("HourUTC").reset_index(drop=True)
@@ -89,7 +90,7 @@ def main():
     print(f"  X_val: {X_val.shape}")
     print(f"  X_test: {X_test.shape}")
 
-    # Model — no Dropout (first version was better)
+    # Model
     print("\nBuilding model...")
     model = Sequential([
         Input(shape=(SEQ_LEN, len(FEATURE_COLS))),

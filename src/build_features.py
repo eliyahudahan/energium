@@ -3,9 +3,14 @@
 Input:  data/processed/merged_clean.parquet
 Output: data/processed/features.parquet
 
-AR lags follow Jørgensen et al. (2025):
-    [1, 2, 3, 6, 12, 24, 48]
-We add 168 (weekly pattern) as an experiment.
+FIX (2026-10-12): removed data leakage in rolling/ramp features.
+All rolling and ramp features now use actual.shift(1) to exclude
+the current hour (which is the target).
+
+Reference: 
+- anofox-forecast: "lag == 0 would include the target value in its own feature window, 
+  which is data leakage for any rolling statistic of the target series"
+- Azure ML: "Time-point joins help prevent data leakage"
 """
 import pandas as pd
 from pathlib import Path
@@ -14,7 +19,11 @@ PROC = Path("data/processed")
 
 
 def build_features(df: pd.DataFrame) -> pd.DataFrame:
-    """Add time, lag, rolling, ramp features and error target."""
+    """Add time, lag, rolling, ramp features and error target.
+
+    IMPORTANT: All rolling and ramp features use shift(1) to ensure
+    they only contain information available BEFORE the current hour.
+    """
     df = df.copy().sort_values("HourUTC").reset_index(drop=True)
 
     # Target
@@ -32,13 +41,19 @@ def build_features(df: pd.DataFrame) -> pd.DataFrame:
     for lag in [1, 2, 3, 6, 12, 24, 48, 168]:
         df[f"lag_{lag}h"] = df["actual_wind_mwh"].shift(lag)
 
-    # Rolling features
+    # Rolling features — WITH shift(1) to prevent leakage
+    # shift(1) excludes the current hour (target)
     for window in [3, 6, 24]:
-        df[f"mean_{window}h"] = df["actual_wind_mwh"].rolling(window).mean()
-        df[f"std_{window}h"] = df["actual_wind_mwh"].rolling(window).std()
+        df[f"mean_{window}h"] = (
+            df["actual_wind_mwh"].shift(1).rolling(window).mean()
+        )
+        df[f"std_{window}h"] = (
+            df["actual_wind_mwh"].shift(1).rolling(window).std()
+        )
 
-    # Ramp
-    df["ramp_1h"] = df["actual_wind_mwh"].diff(1)
+    # Ramp — WITH shift(1) to prevent leakage
+    # ramp_1h = actual(t-1) - actual(t-2)
+    df["ramp_1h"] = df["actual_wind_mwh"].shift(1).diff(1)
 
     # Forecast lags
     for lag in [1, 2, 24]:
