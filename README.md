@@ -156,6 +156,20 @@ Day-by-day logs in [`docs/`](docs/):
 
 ---
 
+## Results (Test, January 2026)
+
+| Model | MAE (MWh) | Skill vs Energinet |
+|---|---|---|
+| Energinet forecast | 637.97 | — |
+| Persistence t-1 | 119.89 | +81.2% |
+| LSTM | 181.33 | +71.6% |
+| **LightGBM** | **100.21** | **+84.3%** 🏆 |
+
+**Winner: LightGBM**
+
+**Test set:** January 2026 — locked, one-shot.
+**Leakage fixed:** rolling and ramp features use `shift(1)`.
+
 ## Status
 
 🚧 **In development** — Day 1 complete (Feasibility Gate passed).
