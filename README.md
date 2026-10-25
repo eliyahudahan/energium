@@ -1,8 +1,6 @@
-
-```markdown
 # 🌿 Energium — Denmark Wind Generation Forecast Correction
 
-**Status:** 🚧 In development — Day 6 of 12 (Decision complete)
+**Status:** 🚧 In development — Day 7 of 12 (Decision complete)
 **Portfolio project. Not deployed in production.**
 
 ## Problem
@@ -26,17 +24,7 @@ The task is **not** to predict wind generation from scratch. The task is to pred
 | Status | Verified, complete |
 
 Wind is computed from four settlement fields:
-
-```
-
-Wind_DK1_MWh =
-OffshoreWindGe100MW_MWh
-
-· OffshoreWindLt100MW_MWh
-· OnshoreWindGe50kW_MWh
-· OnshoreWindLt50kW_MWh
-
-```
+`Wind_DK1_MWh = OffshoreWindGe100MW_MWh + OffshoreWindLt100MW_MWh + OnshoreWindGe50kW_MWh + OnshoreWindLt50kW_MWh`
 
 ## Baseline
 
@@ -48,8 +36,6 @@ OffshoreWindGe100MW_MWh
 | Earliest data | 2020-01-01 |
 | Resolution | Hourly |
 | Unit | MWh |
-
-**Documented limitation:** TimestampUTC reflects the last update time, not the original publication time. The forecast value itself is stable and verified to have no revisions.
 
 ## Method
 
@@ -92,10 +78,6 @@ During development, we found and fixed data leakage in rolling and ramp features
 
 **Fix:** `actual.shift(1)` before rolling/diff.
 
-**Reference:**
-- anofox-forecast: "lag == 0 would include the target value in its own feature window, which is data leakage for any rolling statistic of the target series."
-- Azure ML: "Time-point joins help prevent data leakage."
-
 ## Top Features (LightGBM)
 
 | Rank | Feature | Importance |
@@ -108,22 +90,9 @@ During development, we found and fixed data leakage in rolling and ramp features
 
 ## Metrics
 
-**Primary:**
-- MAE
-- Skill Score vs Energinet: `1 − MAE_model / MAE_Energinet`
-
-**Secondary:**
-- RMSE
-- Bias / Mean Error
-- nMAE (normalized by installed capacity)
-
-**Statistical (planned — Day 9):**
-- Diebold–Mariano test vs Energinet baseline
-
-**Breakdown by:**
-- Month, season
-- Wind regime (low / medium / high)
-- Forecast horizon
+**Primary:** MAE, Skill Score vs Energinet (`1 − MAE_model / MAE_Energinet`)
+**Secondary:** RMSE, Bias / Mean Error, nMAE
+**Statistical (planned — Day 9):** Diebold–Mariano test vs Energinet baseline
 
 ## Data Sources
 
@@ -152,20 +121,16 @@ During development, we found and fixed data leakage in rolling and ramp features
 
 ## Literature Prior
 
-Jørgensen, B.S., Møller, J.K., Nystrup, P., Madsen, H. (2025).
-*Sequential methods for error correction of probabilistic wind power forecasts.*
-Expert Systems with Applications, Vol. 284, Article 127872.
+Jørgensen, B.S., Møller, J.K., Nystrup, P., Madsen, H. (2025). *Sequential methods for error correction of probabilistic wind power forecasts.* Expert Systems with Applications, Vol. 284, Article 127872.
 DOI: 10.1016/j.eswa.2025.127872
 
-**Relevance:** Peer-reviewed, Denmark-specific, LSTM-based forecast correction. Achieved up to 40% MAE improvement on day-ahead wind forecasting.
+**Relevance:** Peer-reviewed, Denmark-specific, LSTM-based forecast correction. Achieved up to 40% MAE improvement.
 
 **Difference from this project:** Jørgensen uses 51 ECMWF ensembles; this project uses a single official forecast from Energinet. Jørgensen provides precedent for LSTM-based correction — not a direct replication.
 
 **Acknowledgments:** Grateful to Dr. Jørgensen for his response to my questions and for making the `nabqr` package open source.
 
 ## Documentation
-
-Day-by-day logs in `docs/`:
 
 | File | Content | Status |
 |---|---|---|
@@ -175,24 +140,10 @@ Day-by-day logs in `docs/`:
 | docs/DAY_4_BASELINES.md | Baseline models | ✅ |
 | docs/DAY_5_LSTM.md | LSTM training | ✅ |
 | docs/DAY_6_LIGHTGBM.md | LightGBM training + leakage fix | ✅ |
-| docs/DAY_7_DECISION.md | Model decision | ⏳ |
+| docs/DAY_7_DECISION.md | Model decision | ✅ |
 | docs/DAY_8_FINAL_EVAL.md | Final test evaluation | ⏳ |
 | docs/DAY_9_ROBUSTNESS.md | Robustness analysis | ⏳ |
 | docs/DAY_12_SUMMARY.md | Project summary | ⏳ |
-
-## Results (Test, January 2026)
-
-| Model | MAE (MWh) | Skill vs Energinet |
-|---|---|---|
-| Energinet forecast | 637.97 | — |
-| Persistence t-1 | 119.89 | +81.2% |
-| LSTM | 181.33 | +71.6% |
-| **LightGBM** | **100.21** | **+84.3%** 🏆 |
-
-**Winner: LightGBM**
-
-**Test set:** January 2026 — locked, one-shot.
-**Leakage fixed:** rolling and ramp features use `shift(1)`.
 
 ## Status
 
@@ -202,8 +153,7 @@ Day-by-day logs in `docs/`:
 - ✅ Day 4: Baselines
 - ✅ Day 5: LSTM (MAE 181.33)
 - ✅ Day 6: LightGBM (MAE 100.21) + Leakage fix
-- ✅ Day 6b: Comparison — LightGBM wins
-- ⏳ Day 7: Decision (in progress)
+- ✅ Day 7: Decision — LightGBM wins
 - ⏳ Day 8: Final Test Eval
 - ⏳ Day 9: Robustness + DM test
 - ⏳ Day 10: Dashboard (Streamlit)
@@ -212,12 +162,15 @@ Day-by-day logs in `docs/`:
 
 ## Limitations
 
-- TimestampUTC in Forecasts_Hour reflects update time, not publication time.
 - ForecastIntraday is null during night hours — not used.
 - Realtime data may contain uncorrected errors — used only for validation, never as GT.
 - DMI provides observations, not forecasts — only lagged features are used.
 - Installed wind capacity has drifted over the training period — normalized metrics (nMAE) are reported.
 - DK2 is out of scope.
+
+## Attribution
+
+Baseline compared against Energinet's official ForecastDayAhead field. Data source: Energinet (Danish TSO).
 
 ## Reproducibility
 
@@ -227,14 +180,7 @@ cd energium
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-```
-
 Data is not committed. See docs/DAY_2_PIPELINE.md for download instructions.
 
 Author
-
-Eliyahu Dahan
-GitHub: @eliyahudahan
-LinkedIn: eliyahu-dahan-684b22294
-
-```
+Eliyahu Dahan · GitHub: @eliyahudahan · LinkedIn: eliyahu-dahan-684b22294
