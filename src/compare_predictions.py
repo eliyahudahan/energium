@@ -95,24 +95,23 @@ def main():
         comp_lstm["actual"] - comp_lstm["corrected_lstm"]
     ).abs()
 
-    # LightGBM comparison (skip first SEQ_LEN to align)
+        # LightGBM comparison (align by HourUTC, not by array slicing)
     comp_lgbm = pd.DataFrame({
-        "HourUTC": test_target_lstm["HourUTC"].values,  # same start
-        "predicted_error_lgbm": lgbm_errors[SEQ_LEN:],
+        "HourUTC": test_target_lgbm["HourUTC"].values,
+        "predicted_error_lgbm": lgbm_errors,
     })
-    comp_lgbm["corrected_lgbm"] = (
-        comp_lstm["forecast_energinet"].values + comp_lgbm["predicted_error_lgbm"]
+
+    # Merge by HourUTC to ensure perfect alignment, then drop NaNs
+    comparison = comp_lstm.merge(comp_lgbm, on="HourUTC", how="inner")
+
+    # Now compute the corrected LGBM values using the aligned forecast
+    comparison["corrected_lgbm"] = (
+        comparison["forecast_energinet"] + comparison["predicted_error_lgbm"]
     )
-    comp_lgbm["abs_error_lgbm"] = (
-        comp_lstm["actual"].values - comp_lgbm["corrected_lgbm"]
+    comparison["abs_error_lgbm"] = (
+        comparison["actual"] - comparison["corrected_lgbm"]
     ).abs()
-
-    # Merge
-    comparison = comp_lstm.copy()
-    comparison["predicted_error_lgbm"] = comp_lgbm["predicted_error_lgbm"].values
-    comparison["corrected_lgbm"] = comp_lgbm["corrected_lgbm"].values
-    comparison["abs_error_lgbm"] = comp_lgbm["abs_error_lgbm"].values
-
+    
     # Show first 20 rows
     print("\n=== First 20 hours of test (January 2026) ===\n")
     cols = [
