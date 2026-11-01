@@ -1,6 +1,6 @@
 # 🌿 Energium — Denmark Wind Generation Forecast Correction
 
-**Status:** 🚧 In development — Day 7 of 12 (Decision complete)
+**Status:** 🚧 In development — Day 9 of 12 (Robustness & Error Analysis)
 **Portfolio project. Not deployed in production.**
 
 ## Problem
@@ -41,7 +41,7 @@ Wind is computed from four settlement fields:
 
 **Residual learning** — the model predicts `error = actual − forecast`, and the final prediction is `forecast + predicted_error`.
 
-Input: [weather features, time features, lag features, official forecast]  
+Input: [weather features, time features, lag features, official forecast, ramp indicators]  
 Output: predicted_error  
 Final: forecast + predicted_error
 
@@ -61,9 +61,35 @@ Both use the same information set and the same evaluation metrics.
 | Energinet forecast | 637.97 | — |
 | Persistence t-1 | 119.89 | +81.2% |
 | LSTM | 181.33 | +71.6% |
-| **LightGBM** | **100.21** | **+84.3%** 🏆 |
+| **LightGBM (baseline, 9 features)** | **100.21** | **+84.3%** |
+| **LightGBM + 3 engineered features** | **97.39** | **+84.7%** |
+| **LightGBM + 16 features (final)** | **93.42** | **+85.4%** 🏆 |
 
-**Winner: LightGBM (MAE = 100.21, Skill = +84.3%).**
+**Winner: LightGBM (MAE = 93.42, Skill = +85.4%).**
+
+## Feature Engineering Iterations
+
+| Iteration | Features | MAE | Δ vs previous |
+|---|---|---|---|
+| Baseline | 9 | 100.21 | — |
+| + engineered | 12 | 97.39 | −2.82 |
+| + rolling | 22 | 93.94 | −3.45 (rejected — not reproducible cleanly) |
+| − rolling | 16 | 94.06 | +0.12 (rolling did not contribute) |
+| + is_moderate_ramp | 17 | 93.42 | −0.64 |
+
+**Final feature set (17):** `forecast_offshore_da`, `forecast_onshore_da`, `forecast_wind_da`, `lag_1h`, `lag_2h`, `lag_3h`, `lag_6h`, `lag_12h`, `lag_24h`, `lag_48h`, `lag_168h`, `ramp_1h`, `forecast_lag_1h`, `forecast_lag_2h`, `forecast_lag_24h`, `is_big_ramp`, `is_moderate_ramp`.
+
+**Definitions:**
+- `is_big_ramp = (|ramp_1h| > 500)` — extreme wind change.
+- `is_moderate_ramp = (0 < ramp_1h ≤ 200)` — moderate upward wind change.
+
+## Error Analysis
+
+**By hour:** Highest errors at 16:00–19:00 (MAE 348–413 in earlier model), lowest at 10:00–13:00 (MAE 109–142). Transition hours (dawn/dusk) are harder.
+
+**By ramp:** Moderate upward ramp (0–200 MWh/h) has the highest error (mean 40.42). Negative ramp (wind decreasing) is well-handled (mean 16.07). Extreme ramp (>500) is too rare in test (n=1) to draw conclusions.
+
+**By region:** All data is DK1. DK2 is out of scope. This is a documented limitation.
 
 ## Leakage Fix (Critical)
 
@@ -78,7 +104,9 @@ During development, we found and fixed data leakage in rolling and ramp features
 
 **Fix:** `actual.shift(1)` before rolling/diff.
 
-## Top Features (LightGBM)
+**Post-fix rolling check:** Rolling features (`mean_3h`, `std_3h`, `mean_6h`, `std_6h`, `mean_24h`, `std_24h`) were re-evaluated after the fix. Adding them changed MAE from 94.06 to 93.94 — a difference of 0.12 MWh, within noise. They were **removed** from the final feature set due to unclear semantics (computed on raw vs. cleaned data) and negligible contribution.
+
+## Top Features (LightGBM, final)
 
 | Rank | Feature | Importance |
 |---|---|---|
@@ -103,8 +131,7 @@ During development, we found and fixed data leakage in rolling and ramp features
 
 ## Scope
 
-- **Region:** DK1 (Jutland + Fyn)
-- **DK2:** Deferred
+- **Region:** DK1 (Jutland + Fyn). **DK2: deferred** — no DK2 rows in current dataset.
 - **Training period:** 2024-01 → 2025-06
 - **Validation period:** 2025-07 → 2025-12
 - **Test period:** January 2026 — locked, one-shot
@@ -118,6 +145,7 @@ During development, we found and fixed data leakage in rolling and ramp features
 | DMI features | Only lagged observations (t-1h, t-2h, ...) |
 | Settlement GT | Never mixed with realtime for training |
 | Curtailment | Filtered before training (countertrade > 1700 MW, spot price < 0, 4h padding) |
+| Rolling features | Computed on `shift(1)` only; removed from final set (see Leakage Fix) |
 
 ## Literature Prior
 
@@ -142,7 +170,7 @@ DOI: 10.1016/j.eswa.2025.127872
 | docs/DAY_6_LIGHTGBM.md | LightGBM training + leakage fix | ✅ |
 | docs/DAY_7_DECISION.md | Model decision | ✅ |
 | docs/DAY_8_FINAL_EVAL.md | Final test evaluation | ⏳ |
-| docs/DAY_9_ROBUSTNESS.md | Robustness analysis | ⏳ |
+| docs/DAY_9_ROBUSTNESS.md | Robustness + error analysis | ⏳ |
 | docs/DAY_12_SUMMARY.md | Project summary | ⏳ |
 
 ## Status
@@ -154,19 +182,21 @@ DOI: 10.1016/j.eswa.2025.127872
 - ✅ Day 5: LSTM (MAE 181.33)
 - ✅ Day 6: LightGBM (MAE 100.21) + Leakage fix
 - ✅ Day 7: Decision — LightGBM wins
-- ⏳ Day 8: Final Test Eval
-- ⏳ Day 9: Robustness + DM test
+- ✅ Day 8: Final Test Eval (MAE 93.42)
+- ⏳ Day 9: Robustness + Error Analysis + DM test
 - ⏳ Day 10: Dashboard (Streamlit)
 - ⏳ Day 11: Production (FastAPI + Docker + Fly.io)
 - ⏳ Day 12: Summary + Blog post
 
 ## Limitations
 
-- ForecastIntraday is null during night hours — not used.
-- Realtime data may contain uncorrected errors — used only for validation, never as GT.
-- DMI provides observations, not forecasts — only lagged features are used.
-- Installed wind capacity has drifted over the training period — normalized metrics (nMAE) are reported.
-- DK2 is out of scope.
+- **DK2 out of scope.** All data is DK1. No DK2 rows present in current dataset.
+- **ForecastIntraday** is null during night hours — not used.
+- **Realtime data** may contain uncorrected errors — used only for validation, never as GT.
+- **DMI provides observations, not forecasts** — only lagged features are used.
+- **Installed wind capacity has drifted** over the training period — normalized metrics (nMAE) are reported.
+- **Extreme ramp (>500 MWh/h)** is too rare in test (n=1) to draw conclusions.
+- **Rolling features** were evaluated but excluded due to unclear semantics and negligible contribution.
 
 ## Attribution
 
