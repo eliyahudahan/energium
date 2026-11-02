@@ -1,3 +1,4 @@
+markdown
 # 🌿 Energium — Denmark Wind Generation Forecast Correction
 
 **Status:** 🚧 In development — Day 9 of 12 (Robustness & Error Analysis)
@@ -61,11 +62,11 @@ Both use the same information set and the same evaluation metrics.
 | Energinet forecast | 637.97 | — |
 | Persistence t-1 | 119.89 | +81.2% |
 | LSTM | 181.33 | +71.6% |
-| **LightGBM (baseline, 9 features)** | **100.21** | **+84.3%** |
-| **LightGBM + 3 engineered features** | **97.39** | **+84.7%** |
-| **LightGBM + 16 features (final)** | **93.42** | **+85.4%** 🏆 |
+| **LightGBM (final, 17 features, canonical process)** | **97.29** | **+84.7%** 🏆 |
 
-**Winner: LightGBM (MAE = 93.42, Skill = +85.4%).**
+**Winner: LightGBM (MAE = 97.29, Skill = +84.7%).**
+
+**Reproducibility note:** The canonical training script is `src/check_mae.py`. It produces MAE = 97.29. Earlier exploratory runs with different hyperparameters produced 93.42 and 101.25; these are not the canonical result. The difference is due to `max_depth` (limited to 6 in the older script) and `callbacks` configuration, not feature changes.
 
 ## Feature Engineering Iterations
 
@@ -182,7 +183,7 @@ DOI: 10.1016/j.eswa.2025.127872
 - ✅ Day 5: LSTM (MAE 181.33)
 - ✅ Day 6: LightGBM (MAE 100.21) + Leakage fix
 - ✅ Day 7: Decision — LightGBM wins
-- ✅ Day 8: Final Test Eval (MAE 93.42)
+- ✅ Day 8: Final Test Eval (MAE 97.29)
 - ⏳ Day 9: Robustness + Error Analysis + DM test
 - ⏳ Day 10: Dashboard (Streamlit)
 - ⏳ Day 11: Production (FastAPI + Docker + Fly.io)
@@ -190,6 +191,7 @@ DOI: 10.1016/j.eswa.2025.127872
 
 ## Limitations
 
+- **Curtailment is removed from training data (intentional).** Per Jørgensen et al. (2025), curtailment hours are filtered out before training because they reflect operator decisions, not wind availability. The model therefore cannot predict curtailment — this is by design, not a data quality issue. `src/apply_curtailment_filter.py` documents the exact filter. Predicting curtailment would require a separate model and a separate dataset.
 - **DK2 out of scope.** All data is DK1. No DK2 rows present in current dataset.
 - **ForecastIntraday** is null during night hours — not used.
 - **Realtime data** may contain uncorrected errors — used only for validation, never as GT.
@@ -210,7 +212,9 @@ cd energium
 python3 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
-Data is not committed. See docs/DAY_2_PIPELINE.md for download instructions.
+# Data is not committed. See docs/DAY_2_PIPELINE.md for download instructions.
+# Run the canonical training script:
+python src/check_mae.py
 
-Author
+**Author**
 Eliyahu Dahan · GitHub: @eliyahudahan · LinkedIn: eliyahu-dahan-684b22294
