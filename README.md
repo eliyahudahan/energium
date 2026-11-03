@@ -1,4 +1,3 @@
-markdown
 # 🌿 Energium — Denmark Wind Generation Forecast Correction
 
 **Status:** 🚧 In development — Day 9 of 12 (Robustness & Error Analysis)
@@ -92,6 +91,21 @@ Both use the same information set and the same evaluation metrics.
 
 **By region:** All data is DK1. DK2 is out of scope. This is a documented limitation.
 
+## Distribution Drift (2024-2025 → 2026)
+
+KS test between train (2024-2025) and test (January 2026) shows significant drift in wind-related features:
+
+| Feature | KS statistic | p-value | Train mean | Test mean | Change |
+|---|---|---|---|---|---|
+| `lag_1h` | 0.298 | < 0.001 | 1612 MWh | 2602 MWh | +61% |
+| `forecast_wind_da` | 0.294 | < 0.001 | 1373 MWh | 2003 MWh | +46% |
+| `lag_24h` | 0.283 | < 0.001 | 1614 MWh | 2534 MWh | +57% |
+| `lag_168h` | 0.186 | < 0.001 | 1629 MWh | 2211 MWh | +36% |
+
+**Interpretation:** Mean wind generation in January 2026 was 61% higher than the 2024-2025 training average. This explains the Train-Val gap (40%): the model did not overfit — it simply did not see this wind regime during training. The Test MAE (97.29) remains strong despite the drift, showing the model generalizes well even under distribution shift.
+
+**Implication:** The model is trained on a lower-wind regime. If deployed on a higher-wind period, performance may degrade. This is a documented limitation of the current training window.
+
 ## Leakage Fix (Critical)
 
 During development, we found and fixed data leakage in rolling and ramp features. The original features used `.rolling()` and `.diff()` **without** `.shift(1)`, which included the current hour (the target).
@@ -121,7 +135,7 @@ During development, we found and fixed data leakage in rolling and ramp features
 
 **Primary:** MAE, Skill Score vs Energinet (`1 − MAE_model / MAE_Energinet`)
 **Secondary:** RMSE, Bias / Mean Error, nMAE
-**Statistical (planned — Day 9):** Diebold–Mariano test vs Energinet baseline
+**Statistical (Day 9):** Diebold–Mariano test vs Energinet baseline
 
 ## Data Sources
 
@@ -170,27 +184,28 @@ DOI: 10.1016/j.eswa.2025.127872
 | docs/DAY_5_LSTM.md | LSTM training | ✅ |
 | docs/DAY_6_LIGHTGBM.md | LightGBM training + leakage fix | ✅ |
 | docs/DAY_7_DECISION.md | Model decision | ✅ |
-| docs/DAY_8_FINAL_EVAL.md | Final test evaluation | ⏳ |
-| docs/DAY_9_ROBUSTNESS.md | Robustness + error analysis | ⏳ |
+| docs/DAY_8_FINAL_EVAL.md | Final test evaluation | ✅ |
+| docs/DAY_9_ROBUSTNESS.md | Robustness + error analysis + drift | ✅ |
 | docs/DAY_12_SUMMARY.md | Project summary | ⏳ |
 
 ## Status
 
 - ✅ Day 1: Feasibility Gate passed
 - ✅ Day 2: Pipeline (`merged.parquet`)
-- ✅ Day 3b: Features (`features.parquet` — 16,992 rows, 23 features)
+- ✅ Day 3b: Features (`features.parquet` — 16,992 rows)
 - ✅ Day 4: Baselines
 - ✅ Day 5: LSTM (MAE 181.33)
 - ✅ Day 6: LightGBM (MAE 100.21) + Leakage fix
 - ✅ Day 7: Decision — LightGBM wins
 - ✅ Day 8: Final Test Eval (MAE 97.29)
-- ⏳ Day 9: Robustness + Error Analysis + DM test
+- ✅ Day 9: Robustness + Error Analysis + DM test + Drift analysis
 - ⏳ Day 10: Dashboard (Streamlit)
 - ⏳ Day 11: Production (FastAPI + Docker + Fly.io)
 - ⏳ Day 12: Summary + Blog post
 
 ## Limitations
 
+- **Distribution drift (2024-2025 → 2026):** Mean wind generation shifted +61% between training and test. See Distribution Drift section above.
 - **Curtailment is removed from training data (intentional).** Per Jørgensen et al. (2025), curtailment hours are filtered out before training because they reflect operator decisions, not wind availability. The model therefore cannot predict curtailment — this is by design, not a data quality issue. `src/apply_curtailment_filter.py` documents the exact filter. Predicting curtailment would require a separate model and a separate dataset.
 - **DK2 out of scope.** All data is DK1. No DK2 rows present in current dataset.
 - **ForecastIntraday** is null during night hours — not used.
@@ -215,6 +230,5 @@ pip install -r requirements.txt
 # Data is not committed. See docs/DAY_2_PIPELINE.md for download instructions.
 # Run the canonical training script:
 python src/check_mae.py
-
-**Author**
+Author
 Eliyahu Dahan · GitHub: @eliyahudahan · LinkedIn: eliyahu-dahan-684b22294

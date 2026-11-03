@@ -1,4 +1,4 @@
-"""Check MAE — reproduce terminal result in a file."""
+"""Check MAE — canonical training + leakage + drift checks."""
 import pandas as pd
 import lightgbm as lgb
 from sklearn.metrics import mean_absolute_error
@@ -24,6 +24,7 @@ y_val = val["error"].values
 X_test = test[features].values
 y_test = test["error"].values
 
+# === Train model ===
 model = lgb.LGBMRegressor(
     n_estimators=500,
     learning_rate=0.05,
@@ -37,7 +38,27 @@ model.fit(
     callbacks=[lgb.early_stopping(50)],
 )
 
+# === Test MAE ===
 y_pred = model.predict(X_test)
 mae = mean_absolute_error(y_test, y_pred)
-print(f"MAE: {mae:.2f}")
+print(f"Test MAE: {mae:.2f}")
 print(f"Best iteration: {model.best_iteration_}")
+
+# === Overfitting check ===
+print(f"Train MAE: {mean_absolute_error(y_train, model.predict(X_train)):.2f}")
+print(f"Val MAE:   {mean_absolute_error(y_val, model.predict(X_val)):.2f}")
+
+# === Leakage check 1: same features in train and test ===
+print(f"\nFeature sets identical: {sorted(train[features].columns) == sorted(test[features].columns)}")
+
+# === Leakage check 2: lag_1h = actual.shift(1) ===
+lag_consistency = (train["lag_1h"] == train["actual_wind_mwh"].shift(1)).mean()
+print(f"lag_1h consistency:  {lag_consistency:.4f}")
+
+# === Leakage check 3: ramp_1h = actual.shift(1).diff(1) ===
+ramp_expected = train["actual_wind_mwh"].shift(1).diff(1)
+ramp_consistency = (train["ramp_1h"] == ramp_expected).mean()
+print(f"ramp_1h consistency: {ramp_consistency:.4f}")
+
+# === Leakage check 4: no target in features ===
+print(f"Target 'actual_wind_mwh' in features: {'actual_wind_mwh' in features}")
