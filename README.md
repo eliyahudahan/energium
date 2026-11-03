@@ -58,12 +58,14 @@ Both use the same information set and the same evaluation metrics.
 
 | Model | MAE (MWh) | Skill vs Energinet |
 |---|---|---|
-| Energinet forecast | 637.97 | — |
-| Persistence t-1 | 119.89 | +81.2% |
-| LSTM | 181.33 | +71.6% |
-| **LightGBM (final, 17 features, canonical process)** | **97.29** | **+84.7%** 🏆 |
+| Energinet forecast | **645.24** | — |
+| Persistence t-1 | 119.89 | +81.4% |
+| LSTM | 181.33 | +71.9% |
+| **LightGBM (final, 17 features, canonical process)** | **97.29** | **+84.9%** 🏆 |
 
-**Winner: LightGBM (MAE = 97.29, Skill = +84.7%).**
+**Winner: LightGBM (MAE = 97.29, Skill = +84.9%).**
+
+**Correction (2026-11-03):** The Energinet MAE on the January 2026 test set is 645.24 MWh, not 637.97 as previously stated. The earlier figure was a computation error (different dataset slice). All Skill scores have been recalculated. The corrected Skill is 84.9%.
 
 **Reproducibility note:** The canonical training script is `src/check_mae.py`. It produces MAE = 97.29. Earlier exploratory runs with different hyperparameters produced 93.42 and 101.25; these are not the canonical result. The difference is due to `max_depth` (limited to 6 in the older script) and `callbacks` configuration, not feature changes.
 
