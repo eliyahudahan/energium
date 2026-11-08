@@ -14,16 +14,21 @@ Energinet publishes an official day-ahead wind forecast. This project tests whet
 Based on 16,992 hours of wind generation (2024-2026) against the official forecast. The model learns the error and corrects it.
 
 ### 3. What is the success rate?
-MAE = 97.29 MWh vs 637.97 for Energinet — an 84.7% improvement.
+MAE = 97.29 MWh vs 645.24 for Energinet — an 84.9% improvement.
 """)
 
-# === Load data ===
-df = pd.read_parquet("data/processed/features.parquet")
+@st.cache_data
+def load_data():
+    df = pd.read_parquet("data/processed/features.parquet")
+    with open("models/lgbm_model.pkl", "rb") as f:
+        model = pickle.load(f)
+    return df, model
+
+df, model = load_data()
+
+# === Filter test set ===
 test = df[df["split"] == "test"].copy()
 
-# === Load model ===
-with open("models/lgbm_model.pkl", "rb") as f:
-    model = pickle.load(f)
 
 features = [
     "forecast_wind_da",
@@ -53,4 +58,24 @@ threshold_mae = 2 * mae
 anomalies_mae = test[test["corrected_error"].abs() > threshold_mae]
 st.write(f"Anomalies (2×MAE = {threshold_mae:.1f} MWh): {len(anomalies_mae)} hours")
 
+# === Graph: actual vs forecast ===
+test = test.set_index("HourUTC")
+fig = px.line(
+    test.reset_index(),
+    x="HourUTC",
+    y=["actual_wind_mwh", "corrected"],
+    title="Actual vs Corrected — January 2026",
+    labels={"value": "MWh", "variable": "Source"},
+)
+st.plotly_chart(fig, use_container_width=True)
+
 st.dataframe(anomalies_mae[["HourUTC", "actual_wind_mwh", "forecast_wind_da", "corrected", "corrected_error"]].sort_values("HourUTC"))
+
+from statsmodels.tsa.stattools import acf
+import numpy as np
+
+residuals = test["corrected_error"].dropna()
+acf_vals = acf(residuals, nlags=24)
+st.write(f"ACF lag-1: {acf_vals[1]:.3f}")
+st.write(f"ACF lag-2: {acf_vals[2]:.3f}")
+st.write(f"ACF lag-3: {acf_vals[3]:.3f}")

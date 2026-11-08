@@ -62,6 +62,7 @@ setuptools==84.0.0
 six==1.17.0
 SQLAlchemy==2.1.6
 starlette==1.10.0
+statsmodels==X.Y.Z
 streamlit==1.66.1
 tabulate==0.10.0
 tensorflow==2.21.0
