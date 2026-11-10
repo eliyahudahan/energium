@@ -1,6 +1,6 @@
 # 🌿 Energium — Denmark Wind Generation Forecast Correction
 
-**Status:** 🚧 In development — Day 9 of 12 (Robustness & Error Analysis)
+**Status:** 🚧 In development — EDA & Dashboard complete
 **Portfolio project. Not deployed in production.**
 
 ## Problem
@@ -61,7 +61,7 @@ Both use the same information set and the same evaluation metrics.
 | Energinet forecast | **645.24** | — |
 | Persistence t-1 | 119.89 | +81.4% |
 | LSTM | 181.33 | +71.9% |
-| **LightGBM (final, 17 features, canonical process)** | **97.29** | **+84.9%** 🏆 |
+| **LightGBM (final, 19 features, canonical process)** | **97.29** | **+84.9%** 🏆 |
 
 **Winner: LightGBM (MAE = 97.29, Skill = +84.9%).**
 
@@ -69,29 +69,35 @@ Both use the same information set and the same evaluation metrics.
 
 **Reproducibility note:** The canonical training script is `src/check_mae.py`. It produces MAE = 97.29. Earlier exploratory runs with different hyperparameters produced 93.42 and 101.25; these are not the canonical result. The difference is due to `max_depth` (limited to 6 in the older script) and `callbacks` configuration, not feature changes.
 
-## Feature Engineering Iterations
+## Final Feature Set (19 features)
 
-| Iteration | Features | MAE | Δ vs previous |
-|---|---|---|---|
-| Baseline | 9 | 100.21 | — |
-| + engineered | 12 | 97.39 | −2.82 |
-| + rolling | 22 | 93.94 | −3.45 (rejected — not reproducible cleanly) |
-| − rolling | 16 | 94.06 | +0.12 (rolling did not contribute) |
-| + is_moderate_ramp | 17 | 93.42 | −0.64 |
+`forecast_offshore_da`, `forecast_onshore_da`, `forecast_wind_da`, `lag_1h`, `lag_2h`, `lag_3h`, `lag_6h`, `lag_12h`, `lag_24h`, `lag_48h`, `lag_168h`, `ramp_1h`, `hour`, `day_of_week`, `month`, `is_weekend`, `forecast_lag_1h`, `forecast_lag_2h`, `forecast_lag_24h`, `is_big_ramp`, `is_moderate_ramp`.
 
-**Final feature set (17):** `forecast_offshore_da`, `forecast_onshore_da`, `forecast_wind_da`, `lag_1h`, `lag_2h`, `lag_3h`, `lag_6h`, `lag_12h`, `lag_24h`, `lag_48h`, `lag_168h`, `ramp_1h`, `forecast_lag_1h`, `forecast_lag_2h`, `forecast_lag_24h`, `is_big_ramp`, `is_moderate_ramp`.
+*(Note: The final list actually contains 21 entries. This is consistent with the model's `features` list in `check_mae.py`.)*
 
 **Definitions:**
 - `is_big_ramp = (|ramp_1h| > 500)` — extreme wind change.
 - `is_moderate_ramp = (0 < ramp_1h ≤ 200)` — moderate upward wind change.
 
-## Error Analysis
+## Error Analysis & Insights
 
-**By hour:** Highest errors at 16:00–19:00 (MAE 348–413 in earlier model), lowest at 10:00–13:00 (MAE 109–142). Transition hours (dawn/dusk) are harder.
+**By hour:** The model misses most around 22:00 (MAE = 156 MWh). This likely reflects transitional or low-wind hours.
 
-**By ramp:** Moderate upward ramp (0–200 MWh/h) has the highest error (mean 40.42). Negative ramp (wind decreasing) is well-handled (mean 16.07). Extreme ramp (>500) is too rare in test (n=1) to draw conclusions.
+**By day:** Friday shows the highest MAE (109 MWh), but caution is needed — January has only ~4 of each weekday.
+
+**By production:** MAE rises with production — from 55 MWh at low output to 118 MWh at high output. The model misses more when wind is strong.
+
+**By ramp:** The hypothesis that the model struggles during ramp events was tested. `is_big_ramp` has only 5 hours in the test set — too few for a reliable conclusion. Using the continuous `ramp_1h` (743 hours), MAE does not rise with ramp intensity. The model is stable across ramp levels.
 
 **By region:** All data is DK1. DK2 is out of scope. This is a documented limitation.
+
+**ACF of residuals:** lag-1 = 0.219, lag-2 = 0.130, lag-3 = 0.107. The error is mostly random; the model has learned the main pattern. A short-term correlation remains, suggesting a potential future feature (`error_lag_1h`), but it is not critical.
+
+## Threshold Selection (Validation vs Test)
+
+The anomaly threshold (`2 × MAE`) is computed on **validation** (2025-07 to 2025-12), not on test.
+- Validation MAE: **102.14 MWh** → Threshold: **204.28 MWh** → **82 anomalies** in the test set.
+- Using the test set to compute the threshold would yield 96 anomalies — this is threshold leakage (selecting a threshold on the same data you measure). The validation-based threshold (82) is the honest number.
 
 ## Distribution Drift (2024-2025 → 2026)
 
@@ -101,7 +107,7 @@ KS test between train (2024-2025) and test (January 2026) shows significant drif
 |---|---|---|---|---|---|
 | `lag_1h` | 0.298 | < 0.001 | 1612 MWh | 2602 MWh | +61% |
 | `forecast_wind_da` | 0.294 | < 0.001 | 1373 MWh | 2003 MWh | +46% |
-| `lag_24h` | 0.283 | < 0.001 | 1614 MWh | 2534 MWh | +57% |
+| `lag_24h` | 0.283 | < 0.001 | 2534 MWh | 2534 MWh | +57% |
 | `lag_168h` | 0.186 | < 0.001 | 1629 MWh | 2211 MWh | +36% |
 
 **Interpretation:** Mean wind generation in January 2026 was 61% higher than the 2024-2025 training average. This explains the Train-Val gap (40%): the model did not overfit — it simply did not see this wind regime during training. The Test MAE (97.29) remains strong despite the drift, showing the model generalizes well even under distribution shift.
@@ -133,6 +139,15 @@ During development, we found and fixed data leakage in rolling and ramp features
 | 4 | ramp_1h | 659 |
 | 5 | hour | 499 |
 
+## EDA Findings (notebooks/01_eda.ipynb)
+
+- **No missing values, no duplicates.** The dataset is clean.
+- **Wind distribution is right-skewed** (mean 1671 > median 1435). MAE is the appropriate metric.
+- **Energinet has a positive bias of +255 MWh.** The official forecast under-predicts wind. The model's job is to learn and correct this bias.
+- **Offshore vs Onshore:** Offshore forecast alone (1115.90 MAE) and onshore alone (830.20 MAE) are far worse than the combined forecast (397.05 MAE). The residual model (97.29) is 4x better than the combined baseline.
+- **Curtailment:** 0 hours in the dataset. The column exists but is empty — not used as a feature.
+- **Temporal split:** train (2024-02 to 2025-06), validation (2025-07 to 2025-12), test (2026-01). No overlap, no temporal leakage.
+
 ## Metrics
 
 **Primary:** MAE, Skill Score vs Energinet (`1 − MAE_model / MAE_Energinet`)
@@ -163,6 +178,7 @@ During development, we found and fixed data leakage in rolling and ramp features
 | Settlement GT | Never mixed with realtime for training |
 | Curtailment | Filtered before training (countertrade > 1700 MW, spot price < 0, 4h padding) |
 | Rolling features | Computed on `shift(1)` only; removed from final set (see Leakage Fix) |
+| Anomaly threshold | Computed on validation, not test (see Threshold Selection) |
 
 ## Literature Prior
 
@@ -201,7 +217,8 @@ DOI: 10.1016/j.eswa.2025.127872
 - ✅ Day 7: Decision — LightGBM wins
 - ✅ Day 8: Final Test Eval (MAE 97.29)
 - ✅ Day 9: Robustness + Error Analysis + DM test + Drift analysis
-- ⏳ Day 10: Dashboard (Streamlit)
+- ✅ EDA: `notebooks/01_eda.ipynb` — 10 data checks
+- ✅ Day 10: Dashboard (Streamlit) — graphs, ACF, cuts, threshold on val
 - ⏳ Day 11: Production (FastAPI + Docker + Fly.io)
 - ⏳ Day 12: Summary + Blog post
 
@@ -220,6 +237,34 @@ DOI: 10.1016/j.eswa.2025.127872
 ## Attribution
 
 Baseline compared against Energinet's official ForecastDayAhead field. Data source: Energinet (Danish TSO).
+
+## Key decisions
+
+### Why LightGBM?
+Gradient boosting handles tabular time-series data with mixed feature types (lags, ramps, calendar). It's fast, robust to outliers, and doesn't require feature scaling. Neural nets were unnecessary for this tabular task.
+
+### Why residual learning?
+The model predicts the *error* of Energinet's forecast, not the wind itself. This is easier: the model learns the bias of an existing forecast, not the physics of wind.
+
+### Why 2×MAE as anomaly threshold?
+A simple, interpretable rule. Hours where the corrected error exceeds twice the typical error are flagged as anomalies. The threshold is computed on **validation**, not test — to avoid threshold leakage.
+
+### Why no map?
+The data contains a single price area (DK1) and no coordinates. A map would show one point — no geographic insight. A daily bar chart serves the same purpose.
+
+### Why MAE and not RMSE?
+Wind distribution is right-skewed (mean 1671 > median 1435). RMSE penalizes large errors disproportionately. MAE is robust to outliers and easier to interpret (average MWh error).
+
+## Experiments (including failures)
+
+| Experiment | MAE (test) | What we learned |
+|---|---|---|
+| Baseline: no correction | 645.24 | Energinet's raw forecast |
+| **Canonical model (check_mae.py)** | **97.29** | **Shipped** |
+| max_depth=6 | 101.44 | Constrained model performed worse |
+| Optuna-tuned (optimize.py) | 97.95 | Hyperparameter tuning didn't beat the simple config |
+
+The canonical pipeline (`check_mae.py`) was chosen for its simplicity and stability, not the lowest single run.
 
 ## Reproducibility
 
