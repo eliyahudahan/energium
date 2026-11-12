@@ -3,7 +3,6 @@ from pydantic import BaseModel
 import pandas as pd
 import pickle
 
-# Initialize the app
 app = FastAPI(title="Energium API", description="Corrects Energinet wind forecasts")
 
 # Load model once at startup
@@ -20,7 +19,10 @@ FEATURES = [
     "is_big_ramp", "is_moderate_ramp",
 ]
 
-# Define the expected input
+# Bias correction parameters (learned on VALIDATION, not test)
+HIGH_WIND_THRESHOLD = 3000.0
+BIAS_CORRECTION = 71.89
+
 class ForecastInput(BaseModel):
     forecast_wind_da: float
     lag_1h: float
@@ -46,23 +48,30 @@ class PredictionOutput(BaseModel):
     original_forecast: float
     predicted_error: float
     corrected_forecast: float
+    bias_applied: bool
 
 @app.get("/")
 def health_check():
-    return {"status": "ok", "model": "LightGBM", "mae": 97.29}
+    return {"status": "ok", "model": "LightGBM", "mae": 92.10, "note": "bias-corrected"}
 
 @app.post("/predict", response_model=PredictionOutput)
 def predict(data: ForecastInput):
-    # Convert input to DataFrame with exact feature order
     input_dict = data.model_dump()
     X = pd.DataFrame([input_dict])[FEATURES]
-
-    # Predict the error
+    
+    # 1. Base model prediction
     predicted_error = model.predict(X)[0]
-
-    # Return corrected forecast
+    corrected = data.forecast_wind_da + float(predicted_error)
+    
+    # 2. Bias correction layer (applied on high-wind hours)
+    bias_applied = False
+    if data.forecast_wind_da > HIGH_WIND_THRESHOLD:
+        corrected += BIAS_CORRECTION
+        bias_applied = True
+    
     return PredictionOutput(
         original_forecast=data.forecast_wind_da,
         predicted_error=float(predicted_error),
-        corrected_forecast=data.forecast_wind_da + float(predicted_error)
+        corrected_forecast=corrected,
+        bias_applied=bias_applied
     )

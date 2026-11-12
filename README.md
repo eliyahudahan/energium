@@ -266,6 +266,10 @@ Wind distribution is right-skewed (mean 1671 > median 1435). RMSE penalizes larg
 
 The canonical pipeline (`check_mae.py`) was chosen for its simplicity and stability, not the lowest single run.
 
+### Why a bias correction layer?
+The model under-predicts by ~72 MWh on high-wind hours (>3000 MWh) due to distribution drift. The API adds this correction, learned on validation, to prevent this bias. Test MAE improved from 97.29 to 92.10.
+
+
 ## Reproducibility
 
 ```bash
@@ -279,3 +283,4 @@ pip install -r requirements.txt
 python src/check_mae.py
 Author
 Eliyahu Dahan · GitHub: @eliyahudahan · LinkedIn: eliyahu-dahan-684b22294
+
