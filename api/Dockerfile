@@ -7,13 +7,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Copy the clean API requirements
+# Copy only what the API needs
 COPY api/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy the API code and the model
-COPY api/ ./api/
-COPY models/ ./models/
+# Copy only the specific API files and the model
+COPY api/main.py ./api/main.py
+COPY models/lgbm_model.pkl ./models/lgbm_model.pkl
 
 # Expose the port and run
 EXPOSE 8000
