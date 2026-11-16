@@ -19,9 +19,11 @@ FEATURES = [
     "is_big_ramp", "is_moderate_ramp",
 ]
 
-# Bias correction parameters (learned on VALIDATION, not test)
-HIGH_WIND_THRESHOLD = 3000.0
-BIAS_CORRECTION = 71.89
+# REMOVED (2026-11-15): Bias correction layer.
+# Reason: validation showed the model is already unbiased at high wind
+# (signed bias = +0.27 MWh, n=217 hours >3000). The previous BIAS_CORRECTION
+# of 71.89 MWh was learned on Energinet's bias, not the model's, and added
+# a new bias of -71.62 MWh in the 3000-5000 range.
 
 class ForecastInput(BaseModel):
     forecast_wind_da: float
@@ -52,26 +54,26 @@ class PredictionOutput(BaseModel):
 
 @app.get("/")
 def health_check():
-    return {"status": "ok", "model": "LightGBM", "mae": 92.10, "note": "bias-corrected"}
+    return {
+    "status": "ok",
+    "model": "LightGBM",
+    "n_features": model.n_features_in_,
+    "best_iteration": model.best_iteration_,
+    "note": "no bias correction — see README for validation MAE"
+}
 
 @app.post("/predict", response_model=PredictionOutput)
 def predict(data: ForecastInput):
     input_dict = data.model_dump()
     X = pd.DataFrame([input_dict])[FEATURES]
-    
-    # 1. Base model prediction
+
+    # Base model prediction (residual learning: predict the error, then add)
     predicted_error = model.predict(X)[0]
     corrected = data.forecast_wind_da + float(predicted_error)
-    
-    # 2. Bias correction layer (applied on high-wind hours)
-    bias_applied = False
-    if data.forecast_wind_da > HIGH_WIND_THRESHOLD:
-        corrected += BIAS_CORRECTION
-        bias_applied = True
-    
+
     return PredictionOutput(
         original_forecast=data.forecast_wind_da,
         predicted_error=float(predicted_error),
         corrected_forecast=corrected,
-        bias_applied=bias_applied
+        bias_applied=False
     )

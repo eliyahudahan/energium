@@ -62,3 +62,9 @@ print(f"ramp_1h consistency: {ramp_consistency:.4f}")
 
 # === Leakage check 4: no target in features ===
 print(f"Target 'actual_wind_mwh' in features: {'actual_wind_mwh' in features}")
+
+import joblib
+m = joblib.load("models/lgbm_model.pkl")
+print("n_features:", m.n_features_in_)
+print("best_iteration:", m.best_iteration_)
+print("params:", m.get_params())

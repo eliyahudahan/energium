@@ -3,6 +3,10 @@ import pandas as pd
 import pickle
 import plotly.express as px
 from statsmodels.tsa.stattools import acf
+import matplotlib
+matplotlib.use("Agg")  # FIX: non-interactive backend for Streamlit
+import matplotlib.pyplot as plt
+from statsmodels.graphics.tsaplots import plot_acf, plot_pacf
 
 # === Title and 3 questions (Nir Etzion) ===
 st.title("🌿 Energium — Denmark Wind Forecast Correction")
@@ -29,7 +33,6 @@ def load_data():
 df, model = load_data()
 
 # === Feature list — must match training order in check_mae.py ===
-# Defined BEFORE any model.predict call, because predict needs it.
 features = [
     "forecast_wind_da",
     "lag_1h", "lag_2h", "lag_3h", "lag_6h", "lag_12h", "lag_24h", "lag_48h", "lag_168h",
@@ -51,22 +54,20 @@ threshold_mae = 2 * val_mae
 test = df[df["split"] == "test"].copy()
 
 # === Predict residual and apply correction ===
-# The model predicts the ERROR (actual - forecast), not the actual value.
-# Corrected forecast = official forecast + predicted error.
 test["predicted_error"] = model.predict(test[features])
 test["corrected"] = test["forecast_wind_da"] + test["predicted_error"]
 test["corrected_error"] = test["actual_wind_mwh"] - test["corrected"]
 
 st.write(f"Test set: {len(test)} hours (January 2026)")
 
-# === MAE comparison: Energinet vs corrected model ===
+# === MAE comparison ===
 energinet_mae = test["error"].abs().mean()
 model_mae = test["corrected_error"].abs().mean()
 st.write(f"Energinet MAE: {energinet_mae:.2f} MWh")
 st.write(f"Model MAE: {model_mae:.2f} MWh")
 st.write(f"Validation MAE (threshold base): {val_mae:.2f} MWh")
 
-# === Anomalies: hours where corrected error > threshold from VAL ===
+# === Anomalies ===
 anomalies_mae = test[test["corrected_error"].abs() > threshold_mae]
 st.write(f"Anomalies (2×val MAE = {threshold_mae:.1f} MWh): {len(anomalies_mae)} hours")
 
@@ -85,21 +86,86 @@ fig = px.line(
 )
 st.plotly_chart(fig, use_container_width=True)
 
-# === Anomalies table (10 rows for review) ===
+# === Anomalies table ===
 st.dataframe(
     anomalies_mae[["HourUTC", "actual_wind_mwh", "forecast_wind_da", "corrected", "corrected_error"]]
     .sort_values("HourUTC")
     .head(10)
 )
 
-# === ACF on residuals — checks if error is random or has a pattern ===
-residuals = test["corrected_error"].dropna()
-acf_vals = acf(residuals, nlags=24)
-st.write(f"ACF lag-1: {acf_vals[1]:.3f}")
-st.write(f"ACF lag-2: {acf_vals[2]:.3f}")
-st.write(f"ACF lag-3: {acf_vals[3]:.3f}")
+# === ACF/PACF on residuals — full lag spectrum (1-168) ===
+st.subheader("Residual Autocorrelation — full lag spectrum")
 
-# === Graph 2: daily MAE (no coordinates in data -> bar chart, not map) ===
+df_sorted = df.sort_values("HourUTC").copy()
+df_sorted["predicted_error"] = model.predict(df_sorted[features])
+df_sorted["corrected"] = df_sorted["forecast_wind_da"] + df_sorted["predicted_error"]
+df_sorted["corrected_error"] = df_sorted["actual_wind_mwh"] - df_sorted["corrected"]
+
+residuals_full = df_sorted["corrected_error"].dropna()
+residuals_test = test["corrected_error"].dropna()
+
+st.write(f"Full residuals: {len(residuals_full)} hours (train+val+test)")
+st.write(f"Test residuals: {len(residuals_test)} hours (January 2026)")
+st.write(f"ACF lag-1 (full): {acf(residuals_full, nlags=1)[1]:.3f}")
+st.write(f"ACF lag-1 (test): {acf(residuals_test, nlags=1)[1]:.3f}")
+
+st.write("**Full series — ACF/PACF (1-168 lags):**")
+fig_full, axes_full = plt.subplots(2, 1, figsize=(10, 6))
+plot_acf(residuals_full, lags=168, ax=axes_full[0])
+axes_full[0].set_title("ACF — full series, lags 1-168")
+plot_pacf(residuals_full, lags=168, method="ywm", ax=axes_full[1])
+axes_full[1].set_title("PACF — full series, lags 1-168")
+plt.tight_layout()
+st.pyplot(fig_full, use_container_width=True)
+# === Read the ACF/PACF — extract conclusions as text ===
+acf_vals_full = acf(residuals_full, nlags=168)
+# 95% confidence band: ~1.96 / sqrt(n)
+conf = 1.96 / (len(residuals_full) ** 0.5)
+
+def spike_strength(lag):
+    v = abs(acf_vals_full[lag])
+    if v > 0.1:
+        return "STRONG"
+    elif v > 0.05:
+        return "MODERATE"
+    elif v > conf:
+        return "WEAK (significant but small)"
+    else:
+        return "—"
+
+st.write(f"**Confidence band (±{conf:.3f}) — lags above are significant:**")
+for lag in [1, 2, 24, 48, 72, 168]:
+    mark = spike_strength(lag)
+    st.write(f"  lag {lag:3d}: ACF = {acf_vals_full[lag]:+.3f}  {mark}")
+
+# Conclusions
+daily = spike(24)
+weekly = spike(168)
+if daily and weekly:
+    st.markdown("**Conclusion:** Significant daily (24) AND weekly (168) seasonality. "
+                "The model misses repeating patterns — candidate for seasonal features.")
+elif daily:
+    st.markdown("**Conclusion:** Significant daily (24) seasonality. "
+                "Model misses a 24-hour pattern — candidate for hour-of-day interaction.")
+elif weekly:
+    st.markdown("**Conclusion:** Significant weekly (168) seasonality. "
+                "Model misses a 7-day pattern — candidate for day-of-week interaction.")
+else:
+    st.markdown("**Conclusion:** No significant seasonality at 24 or 168 lags. "
+                "Residuals are close to white noise at these horizons.")
+plt.close(fig_full)  # FIX: free memory
+
+st.write("**Test only — ACF/PACF (1-168 lags, for comparison):**")
+fig_test, axes_test = plt.subplots(2, 1, figsize=(10, 6))
+plot_acf(residuals_test, lags=168, ax=axes_test[0])
+axes_test[0].set_title("ACF — test only, lags 1-168")
+plot_pacf(residuals_test, lags=168, method="ywm", ax=axes_test[1])
+axes_test[1].set_title("PACF — test only, lags 1-168")
+plt.tight_layout()
+st.pyplot(fig_test, use_container_width=True)
+plt.close(fig_test)  # FIX: free memory
+
+# === Graph 2: daily MAE ===
 test_daily = test.reset_index()
 test_daily["date"] = test_daily["HourUTC"].dt.date
 daily_mae = (
@@ -120,7 +186,7 @@ fig_daily = px.bar(
 )
 st.plotly_chart(fig_daily, use_container_width=True)
 
-# === 4 cuts: where does the model miss? ===
+# === 4 cuts ===
 st.subheader("Where does the model miss?")
 
 # Cut 1: MAE by hour of day
@@ -139,7 +205,7 @@ fig_dow = px.bar(dow_mae, x="day", y="mae", title="MAE by Day of Week",
                  labels={"mae": "MAE (MWh)", "day": "Day"})
 st.plotly_chart(fig_dow, use_container_width=True)
 
-# Cut 3: MAE by production level (5 bins) — cast Interval to str for Plotly
+# Cut 3: MAE by production level
 test_daily["prod_bin"] = pd.cut(test_daily["actual_wind_mwh"], bins=5).astype(str)
 prod_mae = test_daily.groupby("prod_bin", observed=True)["corrected_error"].apply(lambda x: x.abs().mean()).reset_index()
 prod_mae.columns = ["production_range", "mae"]
@@ -147,9 +213,7 @@ fig_prod = px.bar(prod_mae, x="production_range", y="mae", title="MAE by Product
                   labels={"mae": "MAE (MWh)", "production_range": "Production (MWh)"})
 st.plotly_chart(fig_prod, use_container_width=True)
 
-# Cut 4: MAE by ramp intensity — use continuous ramp_1h, not the sparse is_big_ramp (only 5 hours)
-# Why: is_big_ramp has just 5 hours in test — too few for a reliable mean.
-# ramp_1h has all 743 hours, so we can bin it into intensity levels.
+# Cut 4: MAE by ramp intensity
 test_daily["ramp_abs"] = test_daily["ramp_1h"].abs()
 test_daily["ramp_bin"] = pd.cut(test_daily["ramp_abs"], bins=5).astype(str)
 ramp_mae = test_daily.groupby("ramp_bin", observed=True)["corrected_error"].apply(lambda x: x.abs().mean()).reset_index()
@@ -164,7 +228,7 @@ fig_ramp = px.bar(
 )
 st.plotly_chart(fig_ramp, use_container_width=True)
 
-# Report the sparse big-ramp numbers with an explicit caveat
+# Sparse big-ramp numbers with caveat
 big_ramp_count = int(test_daily["is_big_ramp"].sum())
 big_ramp_mae = test_daily[test_daily["is_big_ramp"] == 1]["corrected_error"].abs().mean()
 no_ramp_mae = test_daily[test_daily["is_big_ramp"] == 0]["corrected_error"].abs().mean()
@@ -173,7 +237,7 @@ st.write(f"MAE on big-ramp hours: {big_ramp_mae:.2f} MWh")
 st.write(f"MAE on normal hours:   {no_ramp_mae:.2f} MWh")
 st.write(f"Ramp penalty (caveat: n={big_ramp_count}): {big_ramp_mae - no_ramp_mae:.2f} MWh")
 
-# === Summary: what does each cut teach us? ===
+# === Summary ===
 st.subheader("What the data tells us")
 
 top_hour = hourly_mae.loc[hourly_mae["mae"].idxmax()]
@@ -201,8 +265,7 @@ else:
     st.markdown(f"**Ramp:** MAE does not rise with ramp intensity — model is stable across ramp levels. "
                 f"(Note: only {big_ramp_count} big-ramp hours in test — that cut alone is not reliable.)")
 
-
-# === Feature Importance — what did the model actually learn from? ===
+# === Feature Importance ===
 st.subheader("What did the model learn from?")
 
 importance = pd.DataFrame({
@@ -221,12 +284,10 @@ fig_imp = px.bar(
 fig_imp.update_layout(yaxis=dict(autorange="reversed"))
 st.plotly_chart(fig_imp, use_container_width=True)
 
-# Top 3 features
 top3 = importance.head(3)
 st.markdown(f"**Top 3 features:** {', '.join(top3['feature'].tolist())}")
 
-# Check: is lag_1h (AR(1)) among the top? Is is_big_ramp near the bottom?
 lag1_rank = importance[importance["feature"] == "lag_1h"].index[0] + 1
 ramp_rank = importance[importance["feature"] == "is_big_ramp"].index[0] + 1
 st.markdown(f"**lag_1h rank:** {lag1_rank} / {len(features)} | "
-            f"**is_big_ramp rank:** {ramp_rank} / {len(features)}")      
+            f"**is_big_ramp rank:** {ramp_rank} / {len(features)}")

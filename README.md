@@ -1,6 +1,6 @@
 # 🌿 Energium — Denmark Wind Generation Forecast Correction
 
-**Status:** 🚧 In development — EDA & Dashboard complete
+**Status:** 🚧 In development — EDA, Dashboard, API complete
 **Portfolio project. Not deployed in production.**
 
 ## Problem
@@ -71,9 +71,7 @@ Both use the same information set and the same evaluation metrics.
 
 ## Final Feature Set (19 features)
 
-`forecast_offshore_da`, `forecast_onshore_da`, `forecast_wind_da`, `lag_1h`, `lag_2h`, `lag_3h`, `lag_6h`, `lag_12h`, `lag_24h`, `lag_48h`, `lag_168h`, `ramp_1h`, `hour`, `day_of_week`, `month`, `is_weekend`, `forecast_lag_1h`, `forecast_lag_2h`, `forecast_lag_24h`, `is_big_ramp`, `is_moderate_ramp`.
-
-*(Note: The final list actually contains 21 entries. This is consistent with the model's `features` list in `check_mae.py`.)*
+`forecast_wind_da`, `lag_1h`, `lag_2h`, `lag_3h`, `lag_6h`, `lag_12h`, `lag_24h`, `lag_48h`, `lag_168h`, `ramp_1h`, `hour`, `day_of_week`, `month`, `is_weekend`, `forecast_lag_1h`, `forecast_lag_2h`, `forecast_lag_24h`, `is_big_ramp`, `is_moderate_ramp`.
 
 **Definitions:**
 - `is_big_ramp = (|ramp_1h| > 500)` — extreme wind change.
@@ -91,7 +89,22 @@ Both use the same information set and the same evaluation metrics.
 
 **By region:** All data is DK1. DK2 is out of scope. This is a documented limitation.
 
-**ACF of residuals:** lag-1 = 0.219, lag-2 = 0.130, lag-3 = 0.107. The error is mostly random; the model has learned the main pattern. A short-term correlation remains, suggesting a potential future feature (`error_lag_1h`), but it is not critical.
+## ACF Analysis (Full Series vs Test)
+
+<!-- FIX: ACF numbers now show BOTH full-series and test, with correct interpretation -->
+
+| Lag | Full series (n=16,992) | Test only (n=743) |
+|---|---|---|
+| 1 | 0.108 | 0.219 |
+| 2 | 0.054 | 0.130 |
+| 3 | — | 0.107 |
+| 24 | 0.062 | — |
+| 48 | 0.048 | — |
+| 168 | 0.018 | — |
+
+**Interpretation:** The residual ACF is **weak** across all lags. Lag-24 = 0.062 (daily seasonality) and lag-168 = 0.018 (weekly seasonality) are statistically significant given the large sample, but **practically small** (≈6% and ≈2% of variance). This does **not** justify a full seasonal model — at most, a single `hour × lag_24` interaction feature.
+
+**Critical:** The test ACF lag-1 (0.219) is **2× the full-series value** (0.108). January 2026 is not representative of the full period — it has stronger short-term correlation. This explains why test MAE (97.29) is better than validation MAE (102.14). Any seasonal feature must be validated on walk-forward CV, not on the test set alone.
 
 ## Threshold Selection (Validation vs Test)
 
@@ -138,6 +151,9 @@ During development, we found and fixed data leakage in rolling and ramp features
 | 3 | forecast_lag_1h | 812 |
 | 4 | ramp_1h | 659 |
 | 5 | hour | 499 |
+| 18 | is_big_ramp | < 50 |
+
+**Note:** `is_big_ramp` ranks 18/19 — near-zero contribution. Candidate for removal in walk-forward step.
 
 ## EDA Findings (notebooks/01_eda.ipynb)
 
@@ -218,8 +234,9 @@ DOI: 10.1016/j.eswa.2025.127872
 - ✅ Day 8: Final Test Eval (MAE 97.29)
 - ✅ Day 9: Robustness + Error Analysis + DM test + Drift analysis
 - ✅ EDA: `notebooks/01_eda.ipynb` — 10 data checks
-- ✅ Day 10: Dashboard (Streamlit) — graphs, ACF, cuts, threshold on val
-- ⏳ Day 11: Production (FastAPI + Docker + Fly.io)
+- ✅ Day 10: Dashboard (Streamlit) — graphs, ACF (full + test), cuts, threshold on val
+- ✅ Day 11: Production (FastAPI) — bias correction removed after validation
+- ⏳ Day 11b: Docker + Fly.io
 - ⏳ Day 12: Summary + Blog post
 
 ## Limitations
@@ -233,6 +250,7 @@ DOI: 10.1016/j.eswa.2025.127872
 - **Installed wind capacity has drifted** over the training period — normalized metrics (nMAE) are reported.
 - **Extreme ramp (>500 MWh/h)** is too rare in test (n=1) to draw conclusions.
 - **Rolling features** were evaluated but excluded due to unclear semantics and negligible contribution.
+- **ACF seasonality is weak** (lag-24 = 0.062, lag-168 = 0.018). A seasonal model is not justified by the ACF alone — candidate for walk-forward test.
 
 ## Attribution
 
@@ -255,6 +273,19 @@ The data contains a single price area (DK1) and no coordinates. A map would show
 ### Why MAE and not RMSE?
 Wind distribution is right-skewed (mean 1671 > median 1435). RMSE penalizes large errors disproportionately. MAE is robust to outliers and easier to interpret (average MWh error).
 
+<!-- FIX: Bias correction section rewritten — the old "92.10" number was wrong -->
+### Why was the bias correction layer removed? (2026-11-15)
+The model was tested for signed bias across forecast ranges on validation. Result:
+
+| Forecast range | n | Signed bias |
+|---|---|---|
+| 0–1000 | 1543 | +8.58 |
+| 1000–2000 | 1629 | +5.80 |
+| 2000–3000 | 859 | −7.70 |
+| 3000–5000 | 217 | **+0.27** |
+
+The model is **already unbiased** at high wind (+0.27 MWh). The previous `BIAS_CORRECTION = 71.89` was learned on Energinet's bias, not the model's — it added a **−71.62 MWh** bias in the 3000–5000 range. The layer was removed. Health check now reports `mae: 102.14` (validation), not the historical `92.10`.
+
 ## Experiments (including failures)
 
 | Experiment | MAE (test) | What we learned |
@@ -263,12 +294,9 @@ Wind distribution is right-skewed (mean 1671 > median 1435). RMSE penalizes larg
 | **Canonical model (check_mae.py)** | **97.29** | **Shipped** |
 | max_depth=6 | 101.44 | Constrained model performed worse |
 | Optuna-tuned (optimize.py) | 97.95 | Hyperparameter tuning didn't beat the simple config |
+| Bias correction (+71.89) | 92.10 (historical) | ⚠️ **Invalid** — measured on test with threshold leakage. Corrected measurement: 101.98 (negligible vs 102.14). Removed. |
 
 The canonical pipeline (`check_mae.py`) was chosen for its simplicity and stability, not the lowest single run.
-
-### Why a bias correction layer?
-The model under-predicts by ~72 MWh on high-wind hours (>3000 MWh) due to distribution drift. The API adds this correction, learned on validation, to prevent this bias. Test MAE improved from 97.29 to 92.10.
-
 
 ## Reproducibility
 
@@ -283,4 +311,3 @@ pip install -r requirements.txt
 python src/check_mae.py
 Author
 Eliyahu Dahan · GitHub: @eliyahudahan · LinkedIn: eliyahu-dahan-684b22294
-
