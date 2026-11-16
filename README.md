@@ -298,6 +298,20 @@ The model is **already unbiased** at high wind (+0.27 MWh). The previous `BIAS_C
 
 The canonical pipeline (`check_mae.py`) was chosen for its simplicity and stability, not the lowest single run.
 
+### Walk-Forward Cross-Validation (Jan–Dec 2025, 12 folds)
+To validate whether adding/removing features improves generalization across time, we ran a walk-forward CV on 2025. Train on all data prior to the test month; test on the following month.
+
+| Configuration | Mean MAE | Std | Wins vs Baseline |
+|---|---|---|---|
+| **Baseline (19 features)** | **103.52** | 19.69 | — |
+| Drop `is_big_ramp` (18 features) | 103.59 | 19.86 | 4 / 12 |
+| Add Seasonality (`hour × lag_24`) | 103.57 | 19.65 | 5 / 12 |
+
+**Result:** The canonical 19-feature model remains the best. Removing `is_big_ramp` and adding seasonality both degraded performance by ~0.05–0.07 MWh on average and won on only 4–5 out of 12 months.
+
+**Decision:** Keep the canonical 19-feature model. The weak ACF seasonality (lag-24 = 0.062) is not strong enough to justify a new feature. `is_big_ramp` stays — removing it adds noise, even though its gain importance is low.
+
+
 ## Reproducibility
 
 ```bash
