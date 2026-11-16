@@ -91,8 +91,6 @@ Both use the same information set and the same evaluation metrics.
 
 ## ACF Analysis (Full Series vs Test)
 
-<!-- FIX: ACF numbers now show BOTH full-series and test, with correct interpretation -->
-
 | Lag | Full series (n=16,992) | Test only (n=743) |
 |---|---|---|
 | 1 | 0.108 | 0.219 |
@@ -153,7 +151,7 @@ During development, we found and fixed data leakage in rolling and ramp features
 | 5 | hour | 499 |
 | 18 | is_big_ramp | < 50 |
 
-**Note:** `is_big_ramp` ranks 18/19 — near-zero contribution. Candidate for removal in walk-forward step.
+**Note:** `is_big_ramp` ranks 18/19 — very low gain importance. In walk-forward CV (see below), removing it slightly degraded performance (mean MAE 103.52 → 103.59). **Decision: keep it.** Removing a feature that is not harming the model adds noise, not signal.
 
 ## EDA Findings (notebooks/01_eda.ipynb)
 
@@ -234,9 +232,10 @@ DOI: 10.1016/j.eswa.2025.127872
 - ✅ Day 8: Final Test Eval (MAE 97.29)
 - ✅ Day 9: Robustness + Error Analysis + DM test + Drift analysis
 - ✅ EDA: `notebooks/01_eda.ipynb` — 10 data checks
-- ✅ Day 10: Dashboard (Streamlit) — graphs, ACF (full + test), cuts, threshold on val
+- ✅ Day 10: Dashboard (Streamlit) — graphs, ACF, cuts, threshold on val
 - ✅ Day 11: Production (FastAPI) — bias correction removed after validation
-- ⏳ Day 11b: Docker + Fly.io
+- ✅ Day 11b: Docker build + run verified (energium-api, 920MB)
+- ⏳ Day 11c: Fly.io deployment (pending)
 - ⏳ Day 12: Summary + Blog post
 
 ## Limitations
@@ -273,7 +272,6 @@ The data contains a single price area (DK1) and no coordinates. A map would show
 ### Why MAE and not RMSE?
 Wind distribution is right-skewed (mean 1671 > median 1435). RMSE penalizes large errors disproportionately. MAE is robust to outliers and easier to interpret (average MWh error).
 
-<!-- FIX: Bias correction section rewritten — the old "92.10" number was wrong -->
 ### Why was the bias correction layer removed? (2026-11-15)
 The model was tested for signed bias across forecast ranges on validation. Result:
 
@@ -285,6 +283,9 @@ The model was tested for signed bias across forecast ranges on validation. Resul
 | 3000–5000 | 217 | **+0.27** |
 
 The model is **already unbiased** at high wind (+0.27 MWh). The previous `BIAS_CORRECTION = 71.89` was learned on Energinet's bias, not the model's — it added a **−71.62 MWh** bias in the 3000–5000 range. The layer was removed. Health check now reports `mae: 102.14` (validation), not the historical `92.10`.
+
+### Why keep `is_big_ramp` despite low importance?
+Walk-forward CV (see below) tested removing it: mean MAE went from 103.52 (baseline) to 103.59 (without `is_big_ramp`). Removing it slightly **degraded** performance. A feature with low gain importance can still provide a small stabilizing effect. **Decision: keep it.** "If it ain't broke, don't fix it."
 
 ## Experiments (including failures)
 
@@ -311,6 +312,15 @@ To validate whether adding/removing features improves generalization across time
 
 **Decision:** Keep the canonical 19-feature model. The weak ACF seasonality (lag-24 = 0.062) is not strong enough to justify a new feature. `is_big_ramp` stays — removing it adds noise, even though its gain importance is low.
 
+### Docker Verification (2026-11-16)
+The API was containerized and verified end-to-end.
+
+- **Image size:** 920MB (215MB compressed).
+- **Base:** `python:3.12-slim` + `libgomp1` (required by LightGBM).
+- **Build:** `docker build -t energium-api -f api/Dockerfile .`
+- **Run:** `docker run -p 8000:8000 energium-api`
+- **Health check:** `curl http://localhost:8000/` returns `{"status":"ok","model":"LightGBM","n_features":19,"best_iteration":223,...}`.
+- **Result:** The API runs inside Docker with the canonical 19-feature model. Ready for deployment.
 
 ## Reproducibility
 
