@@ -1,6 +1,8 @@
 """Check MAE — canonical training + leakage + drift checks."""
-import pandas as pd
+import joblib
 import lightgbm as lgb
+import pandas as pd
+from scipy.stats import ks_2samp
 from sklearn.metrics import mean_absolute_error
 
 df = pd.read_parquet("data/processed/features.parquet")
@@ -48,23 +50,40 @@ print(f"Best iteration: {model.best_iteration_}")
 print(f"Train MAE: {mean_absolute_error(y_train, model.predict(X_train)):.2f}")
 print(f"Val MAE:   {mean_absolute_error(y_val, model.predict(X_val)):.2f}")
 
-# === Leakage check 1: same features in train and test ===
-print(f"\nFeature sets identical: {sorted(train[features].columns) == sorted(test[features].columns)}")
-
-# === Leakage check 2: lag_1h = actual.shift(1) ===
+# === Leakage checks (with strict assertions) ===
+same_cols = sorted(train[features].columns) == sorted(test[features].columns)
 lag_consistency = (train["lag_1h"] == train["actual_wind_mwh"].shift(1)).mean()
-print(f"lag_1h consistency:  {lag_consistency:.4f}")
-
-# === Leakage check 3: ramp_1h = actual.shift(1).diff(1) ===
 ramp_expected = train["actual_wind_mwh"].shift(1).diff(1)
 ramp_consistency = (train["ramp_1h"] == ramp_expected).mean()
+target_in_features = "actual_wind_mwh" in features
+
+print(f"\nFeature sets identical: {same_cols}")
+print(f"lag_1h consistency:  {lag_consistency:.4f}")
 print(f"ramp_1h consistency: {ramp_consistency:.4f}")
+print(f"Target 'actual_wind_mwh' in features: {target_in_features}")
 
-# === Leakage check 4: no target in features ===
-print(f"Target 'actual_wind_mwh' in features: {'actual_wind_mwh' in features}")
+assert same_cols, "Leakage check failed: feature mismatch between train and test!"
+assert lag_consistency > 0.999, f"Leakage check failed in lag_1h: {lag_consistency:.4f}"
+assert ramp_consistency > 0.999, f"Leakage check failed in ramp_1h: {ramp_consistency:.4f}"
+assert not target_in_features, "Leakage check failed: target found in features!"
 
-import joblib
+# === Drift checks (KS-test: All Train vs. Seasonal January Cohort) ===
+print("\n=== Distribution Drift Checks (KS-Test) ===")
+drift_features = ["lag_1h", "forecast_wind_da", "lag_24h", "lag_168h"]
+train_jan = train[train["month"] == 1]
+
+for col in drift_features:
+    ks_all, p_all = ks_2samp(train[col].dropna(), test[col].dropna())
+    ks_jan, p_jan = ks_2samp(train_jan[col].dropna(), test[col].dropna())
+    print(
+        f"{col:18s} | vs All Train: KS={ks_all:.3f} (p={p_all:.4f}) "
+        f"| vs Train Jan: KS={ks_jan:.3f} (p={p_jan:.4f})"
+    )
+
+# === Saved artifact verification ===
+print("\n=== Saved Model Artifact Check ===")
 m = joblib.load("models/lgbm_model.pkl")
 print("n_features:", m.n_features_in_)
 print("best_iteration:", m.best_iteration_)
 print("params:", m.get_params())
+assert m.n_features_in_ == len(features), "Saved model feature count mismatch!"
