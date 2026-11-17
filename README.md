@@ -110,20 +110,21 @@ The anomaly threshold (`2 × MAE`) is computed on **validation** (2025-07 to 202
 - Validation MAE: **102.14 MWh** → Threshold: **204.28 MWh** → **82 anomalies** in the test set.
 - Using the test set to compute the threshold would yield 96 anomalies — this is threshold leakage (selecting a threshold on the same data you measure). The validation-based threshold (82) is the honest number.
 
-## Distribution Drift (2024-2025 → 2026)
+## Distribution Drift (Train → January 2026 Test)
 
-KS test between train (2024-2025) and test (January 2026) shows significant drift in wind-related features:
+KS test between train (`2024-02` to `2025-06`) and test (`January 2026`) highlights significant wind generation drift and seasonal variation:
 
-| Feature | KS statistic | p-value | Train mean | Test mean | Change |
-|---|---|---|---|---|---|
-| `lag_1h` | 0.298 | < 0.001 | 1612 MWh | 2602 MWh | +61% |
-| `forecast_wind_da` | 0.294 | < 0.001 | 1373 MWh | 2003 MWh | +46% |
-| `lag_24h` | 0.283 | < 0.001 | 2534 MWh | 2534 MWh | +57% |
-| `lag_168h` | 0.186 | < 0.001 | 1629 MWh | 2211 MWh | +36% |
+| Feature | KS (vs All Train) | KS (vs Train Jan) | p-value | Train mean | Test mean | Change |
+|---|---|---|---|---|---|---|
+| `lag_1h` | 0.298 | 0.171 | < 0.001 | 1612 MWh | 2602 MWh | +61% |
+| `forecast_wind_da` | 0.294 | 0.177 | < 0.001 | 1373 MWh | 2003 MWh | +46% |
+| `lag_24h` | 0.283 | 0.136 | < 0.001 | 1614 MWh | 2534 MWh | +57% |
+| `lag_168h` | 0.186 | 0.092 | 0.003 | 1629 MWh | 2211 MWh | +36% |
 
-**Interpretation:** Mean wind generation in January 2026 was 61% higher than the 2024-2025 training average. This explains the Train-Val gap (40%): the model did not overfit — it simply did not see this wind regime during training. The Test MAE (97.29) remains strong despite the drift, showing the model generalizes well even under distribution shift.
+**Interpretation:** January 2026 showed a 61% increase in mean wind generation over the training average. Comparing against historical January data cuts the KS statistic by ~43%, indicating that winter seasonality accounts for part of the shift, while structural capacity or higher wind regimes explain the rest. Test MAE remained resilient at **97.29 MWh**.
 
-**Implication:** The model is trained on a lower-wind regime. If deployed on a higher-wind period, performance may degrade. This is a documented limitation of the current training window.
+**Implication:** Model performance may degrade during persistent high-wind regimes due to the lower-wind training set. This is tracked automatically via `src/check_mae.py`.
+
 
 ## Leakage Fix (Critical)
 
