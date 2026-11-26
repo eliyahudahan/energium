@@ -93,6 +93,17 @@ def run_walk_forward_cv() -> None:
         wins = sum(1 for a, b in zip(maes, baseline_maes) if a < b) if name != "Baseline (19)" else "-"
         print(f"{name:<25} | {mean_mae:<10.2f} | {std_mae:<8.2f} | {wins} / {len(maes)}")
 
+times = [
+    pd.Timestamp("2025-01-01 08:00"),
+    pd.Timestamp("2025-01-01 09:00"),
+    pd.Timestamp("2025-01-01 11:00"),
+]
+
+def show_diffs(times):
+    for i in range(1, len(times)):
+        print((i, times[i] - times[i-1]))
+
+show_diffs(times)
 
 if __name__ == "__main__":
     run_walk_forward_cv()
